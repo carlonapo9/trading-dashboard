@@ -1,277 +1,165 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { useDispatch, useSelector } from "react-redux";
+import type { RootState, AppDispatch } from "./store";
+import { upsert } from "./marketSlice";
 
-type Price = {
-  symbol: string;
-  price: number;
-  type: "crypto" | "stock" | "fx";
-  direction: "up" | "down" | "same";
-};
+const CRYPTO =
+  "wss://stream.binance.com:9443/ws/btcusdt@trade/ethusdt@trade/solusdt@trade";
 
-function getDirection(
-  oldPrice: number | undefined,
-  newPrice: number
-): "up" | "down" | "same" {
-  if (oldPrice === undefined) return "same";
-  if (newPrice === oldPrice) return "same";
-  return newPrice > oldPrice ? "up" : "down";
-}
+const STOCKS = ["AAPL", "MSFT", "TSLA", "AMZN", "GOOGL"];
+
+const FX = [
+  { key: "EUR", label: "EUR/USD" },
+  { key: "GBP", label: "GBP/USD" },
+  { key: "JPY", label: "USD/JPY" },
+];
+
+const KEY = "d8i21l9r01qm63b99ti0d8i21l9r01qm63b99tig";
 
 export default function App() {
-  const [data, setData] = useState<Record<string, Price>>({});
+  const dispatch = useDispatch<AppDispatch>();
+  const data = useSelector((s: RootState) => s.market.data);
 
+  // CRYPTO
   useEffect(() => {
-    // =========================
-    // CRYPTO (BINANCE STREAM)
-    // =========================
-    const cryptoSocket = new WebSocket(
-      "wss://stream.binance.com:9443/ws/btcusdt@trade/ethusdt@trade/solusdt@trade"
-    );
+    const ws = new WebSocket(CRYPTO);
 
-    cryptoSocket.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (!msg?.s || !msg?.p) return;
 
-      if (!msg.s || !msg.p) return;
+      dispatch(
+        upsert({
+          symbol: msg.s,
+          price: Number(msg.p),
+          type: "crypto",
+        })
+      );
+    };
 
-      setData((prev) => {
-        const old = prev[msg.s]?.price;
+    return () => ws.close();
+  }, [dispatch]);
 
-        return {
-          ...prev,
-          [msg.s]: {
-            symbol: msg.s,
-            price: Number(msg.p),
-            type: "crypto",
-            direction: getDirection(old, Number(msg.p)),
-          },
-        };
+  // STOCKS
+  useEffect(() => {
+    const run = async () => {
+      const results = await Promise.all(
+        STOCKS.map(async (s) => {
+          const r = await fetch(
+            `https://finnhub.io/api/v1/quote?symbol=${s}&token=${KEY}`
+          );
+          const j = await r.json();
+          return { s, price: j?.c };
+        })
+      );
+
+      results.forEach((x) => {
+        if (typeof x.price === "number") {
+          dispatch(
+            upsert({
+              symbol: x.s,
+              price: x.price,
+              type: "stock",
+            })
+          );
+        }
       });
     };
 
-    // =========================
-    // STOCKS (FINNHUB POLLING)
-    // =========================
-    const FINNHUB_KEY =
-      "d8i21l9r01qm63b99ti0d8i21l9r01qm63b99tig";
+    run();
+    const id = setInterval(run, 4000);
+    return () => clearInterval(id);
+  }, [dispatch]);
 
-    const stockSymbols = ["AAPL", "MSFT", "TSLA", "AMZN", "GOOGL"];
+  // FX
+  useEffect(() => {
+    const run = async () => {
+      const r = await fetch("https://open.er-api.com/v6/latest/USD");
+      const j = await r.json();
+      if (!j?.rates) return;
 
-    const fetchStocks = async () => {
-      try {
-        const updates: Record<string, Price> = {};
+      FX.forEach((p) => {
+        const rate = j.rates[p.key];
+        if (!rate) return;
 
-        for (const s of stockSymbols) {
-          const res = await fetch(
-            `https://finnhub.io/api/v1/quote?symbol=${s}&token=${FINNHUB_KEY}`
-          );
-
-          const json = await res.json();
-
-          if (typeof json?.c !== "number") continue;
-
-          updates[s] = {
-            symbol: s,
-            price: json.c,
-            type: "stock",
-            direction: "same",
-          };
-        }
-
-        setData((prev) => {
-          const merged = { ...prev };
-
-          for (const k in updates) {
-            const old = prev[k]?.price;
-
-            merged[k] = {
-              ...updates[k],
-              direction: getDirection(old, updates[k].price),
-            };
-          }
-
-          return merged;
-        });
-      } catch (e) {
-        console.error("Stock error:", e);
-      }
+        dispatch(
+          upsert({
+            symbol: p.label,
+            price: rate,
+            type: "fx",
+          })
+        );
+      });
     };
 
-    fetchStocks();
-    const stockInterval = setInterval(fetchStocks, 3000);
+    run();
+    const id = setInterval(run, 5000);
+    return () => clearInterval(id);
+  }, [dispatch]);
 
-    // =========================
-    // FX (OPEN EXCHANGE RATE)
-    // =========================
-    const fetchFX = async () => {
-      try {
-        const res = await fetch("https://open.er-api.com/v6/latest/USD");
-        const json = await res.json();
+  const Column = ({
+    title,
+    type,
+    color,
+  }: {
+    title: string;
+    type: "crypto" | "stock" | "fx";
+    color: string;
+  }) => {
+    const items = Object.values(data).filter((i) => i.type === type);
 
-        if (!json?.rates) return;
+    return (
+      <div style={{ flex: 1 }}>
+        <h3 style={{ color }}>{title}</h3>
 
-        const pairs = [
-          { key: "EUR", label: "EUR/USD" },
-          { key: "GBP", label: "GBP/USD" },
-          { key: "JPY", label: "USD/JPY" },
-        ];
-
-        setData((prev) => {
-          const updated = { ...prev };
-
-          for (const p of pairs) {
-            const rate = json.rates[p.key];
-            if (!rate) continue;
-
-            const old = prev[p.label]?.price;
-
-            updated[p.label] = {
-              symbol: p.label,
-              price: rate,
-              type: "fx",
-              direction: getDirection(old, rate),
-            };
-          }
-
-          return updated;
-        });
-      } catch (e) {
-        console.error("FX ERROR:", e);
-      }
-    };
-
-    fetchFX();
-    const fxInterval = setInterval(fetchFX, 5000);
-
-    return () => {
-      cryptoSocket.close();
-      clearInterval(stockInterval);
-      clearInterval(fxInterval);
-    };
-  }, []);
+        {items.map((i) => (
+          <div
+            key={i.symbol}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              padding: "4px 8px",
+              marginBottom: 4,
+              fontSize: 13,
+              borderRadius: 4,
+              background:
+                i.direction === "up"
+                  ? "rgba(0,255,0,0.10)"
+                  : i.direction === "down"
+                  ? "rgba(255,0,0,0.10)"
+                  : "transparent",
+            }}
+          >
+            <span>{i.symbol}</span>
+            <span>
+              {i.price.toFixed(2)}{" "}
+              {i.direction === "up"
+                ? "↑"
+                : i.direction === "down"
+                ? "↓"
+                : ""}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   return (
     <div
       style={{
         padding: 20,
-        fontFamily: "sans-serif",
         background: "#0b0f14",
         color: "#e6e6e6",
+        fontFamily: "sans-serif",
       }}
     >
-      <h1 style={{ marginBottom: 16 }}>Multi Market Terminal</h1>
+      <h1>Multi Market Terminal</h1>
 
       <div style={{ display: "flex", gap: 12 }}>
-
-        {/* ================= CRYPTO ================= */}
-        <div style={{ flex: 1 }}>
-          <h3 style={{ color: "#00d4ff" }}>CRYPTO</h3>
-
-          {Object.values(data)
-            .filter((i) => i.type === "crypto")
-            .map((item) => (
-              <div
-                key={item.symbol}
-                style={{
-                  padding: "4px 8px",
-                  fontSize: 13,
-                  display: "flex",
-                  justifyContent: "space-between",
-                  marginBottom: 4,
-                  borderRadius: 4,
-                  background:
-                    item.direction === "up"
-                      ? "rgba(0,255,0,0.10)"
-                      : item.direction === "down"
-                      ? "rgba(255,0,0,0.10)"
-                      : "transparent",
-                }}
-              >
-                <span>{item.symbol}</span>
-                <span>
-                  {item.price.toFixed(2)}{" "}
-                  {item.direction === "up"
-                    ? "↑"
-                    : item.direction === "down"
-                    ? "↓"
-                    : ""}
-                </span>
-              </div>
-            ))}
-        </div>
-
-        {/* ================= STOCKS ================= */}
-        <div style={{ flex: 1 }}>
-          <h3 style={{ color: "#ffd166" }}>STOCKS</h3>
-
-          {Object.values(data)
-            .filter((i) => i.type === "stock")
-            .map((item) => (
-              <div
-                key={item.symbol}
-                style={{
-                  padding: "4px 8px",
-                  fontSize: 13,
-                  display: "flex",
-                  justifyContent: "space-between",
-                  marginBottom: 4,
-                  borderRadius: 4,
-                  background:
-                    item.direction === "up"
-                      ? "rgba(0,255,0,0.10)"
-                      : item.direction === "down"
-                      ? "rgba(255,0,0,0.10)"
-                      : "transparent",
-                }}
-              >
-                <span>{item.symbol}</span>
-                <span>
-                  {item.price.toFixed(2)}{" "}
-                  {item.direction === "up"
-                    ? "↑"
-                    : item.direction === "down"
-                    ? "↓"
-                    : ""}
-                </span>
-              </div>
-            ))}
-        </div>
-
-        {/* ================= FX ================= */}
-        <div style={{ flex: 1 }}>
-          <h3 style={{ color: "#a0ff7a" }}>FX</h3>
-
-          {Object.values(data)
-            .filter((i) => i.type === "fx")
-            .map((item) => (
-              <div
-                key={item.symbol}
-                style={{
-                  padding: "4px 8px",
-                  fontSize: 13,
-                  display: "flex",
-                  justifyContent: "space-between",
-                  marginBottom: 4,
-                  borderRadius: 4,
-                  background:
-                    item.direction === "up"
-                      ? "rgba(0,255,0,0.10)"
-                      : item.direction === "down"
-                      ? "rgba(255,0,0,0.10)"
-                      : "transparent",
-                }}
-              >
-                <span>{item.symbol}</span>
-                <span>
-                  {item.price.toFixed(2)}{" "}
-                  {item.direction === "up"
-                    ? "↑"
-                    : item.direction === "down"
-                    ? "↓"
-                    : ""}
-                </span>
-              </div>
-            ))}
-        </div>
-
+        <Column title="CRYPTO" type="crypto" color="#00d4ff" />
+        <Column title="STOCKS" type="stock" color="#ffd166" />
+        <Column title="FX" type="fx" color="#a0ff7a" />
       </div>
     </div>
   );
