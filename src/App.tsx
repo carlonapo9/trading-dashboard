@@ -2,23 +2,29 @@ import { useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import type { RootState, AppDispatch } from "./store";
 import { upsert } from "./marketSlice";
+import { addTrade } from "./tradeSlice";
+import { useMarketFeeds } from "./useMarketFeeds";
 
 const CRYPTO =
   "wss://stream.binance.com:9443/ws/btcusdt@trade/ethusdt@trade/solusdt@trade";
 
-const STOCKS = ["AAPL", "MSFT", "TSLA", "AMZN", "GOOGL"];
+const STOCKS = ["AAPL", "MSFT", "TSLA", "AMZN", "GOOGL"] as const;
 
 const FX = [
   { key: "EUR", label: "EUR/USD" },
   { key: "GBP", label: "GBP/USD" },
   { key: "JPY", label: "USD/JPY" },
-];
+] as const;
 
-const KEY = "d8i21l9r01qm63b99ti0d8i21l9r01qm63b99tig";
+const FINNHUB_KEY = "d8i21l9r01qm63b99ti0d8i21l9r01qm63b99tig";
 
 export default function App() {
   const dispatch = useDispatch<AppDispatch>();
   const data = useSelector((s: RootState) => s.market.data);
+  const trades = useSelector((s: RootState) => s.trade.trades);
+  const positions = useSelector((s: RootState) => s.trade.positions);
+
+  useMarketFeeds();
 
   // CRYPTO
   useEffect(() => {
@@ -26,15 +32,11 @@ export default function App() {
 
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data);
-      if (!msg?.s || !msg?.p) return;
 
-      dispatch(
-        upsert({
-          symbol: msg.s,
-          price: Number(msg.p),
-          type: "crypto",
-        })
-      );
+      const price = Number(msg?.p);
+      if (!msg?.s || !Number.isFinite(price)) return;
+
+      dispatch(upsert({ symbol: msg.s, price, type: "crypto" }));
     };
 
     return () => ws.close();
@@ -46,22 +48,16 @@ export default function App() {
       const results = await Promise.all(
         STOCKS.map(async (s) => {
           const r = await fetch(
-            `https://finnhub.io/api/v1/quote?symbol=${s}&token=${KEY}`
+            `https://finnhub.io/api/v1/quote?symbol=${s}&token=${FINNHUB_KEY}`
           );
           const j = await r.json();
-          return { s, price: j?.c };
+          return { s, price: Number(j?.c) };
         })
       );
 
       results.forEach((x) => {
-        if (typeof x.price === "number") {
-          dispatch(
-            upsert({
-              symbol: x.s,
-              price: x.price,
-              type: "stock",
-            })
-          );
+        if (Number.isFinite(x.price)) {
+          dispatch(upsert({ symbol: x.s, price: x.price, type: "stock" }));
         }
       });
     };
@@ -76,19 +72,15 @@ export default function App() {
     const run = async () => {
       const r = await fetch("https://open.er-api.com/v6/latest/USD");
       const j = await r.json();
-      if (!j?.rates) return;
+
+      const rates = j?.rates;
+      if (!rates) return;
 
       FX.forEach((p) => {
-        const rate = j.rates[p.key];
-        if (!rate) return;
+        const rate = Number(rates[p.key]);
+        if (!Number.isFinite(rate)) return;
 
-        dispatch(
-          upsert({
-            symbol: p.label,
-            price: rate,
-            type: "fx",
-          })
-        );
+        dispatch(upsert({ symbol: p.label, price: rate, type: "fx" }));
       });
     };
 
@@ -96,6 +88,29 @@ export default function App() {
     const id = setInterval(run, 5000);
     return () => clearInterval(id);
   }, [dispatch]);
+
+  // LATENCY SIMULATION TRADE (FIX: real UI behavior)
+  const placeTrade = (
+    symbol: string,
+    price: number,
+    type: "crypto" | "stock" | "fx",
+    side: "buy" | "sell"
+  ) => {
+    const tradeSnapshot = {
+      id: crypto.randomUUID(),
+      symbol,
+      price,
+      type,
+      side,
+      time: Date.now(),
+    };
+
+    const latency = 300 + Math.random() * 1200;
+
+    setTimeout(() => {
+      dispatch(addTrade(tradeSnapshot));
+    }, latency);
+  };
 
   const Column = ({
     title,
@@ -118,27 +133,31 @@ export default function App() {
             style={{
               display: "flex",
               justifyContent: "space-between",
-              padding: "4px 8px",
-              marginBottom: 4,
-              fontSize: 13,
-              borderRadius: 4,
-              background:
-                i.direction === "up"
-                  ? "rgba(0,255,0,0.10)"
-                  : i.direction === "down"
-                  ? "rgba(255,0,0,0.10)"
-                  : "transparent",
+              padding: 6,
+              marginBottom: 6,
+              background: "rgba(255,255,255,0.05)",
             }}
           >
             <span>{i.symbol}</span>
-            <span>
-              {i.price.toFixed(2)}{" "}
-              {i.direction === "up"
-                ? "↑"
-                : i.direction === "down"
-                ? "↓"
-                : ""}
-            </span>
+            <span>{i.price.toFixed(2)}</span>
+
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                onClick={() =>
+                  placeTrade(i.symbol, i.price, i.type, "buy")
+                }
+              >
+                BUY
+              </button>
+
+              <button
+                onClick={() =>
+                  placeTrade(i.symbol, i.price, i.type, "sell")
+                }
+              >
+                SELL
+              </button>
+            </div>
           </div>
         ))}
       </div>
@@ -146,20 +165,43 @@ export default function App() {
   };
 
   return (
-    <div
-      style={{
-        padding: 20,
-        background: "#0b0f14",
-        color: "#e6e6e6",
-        fontFamily: "sans-serif",
-      }}
-    >
+    <div style={{ padding: 20, background: "#0b0f14", color: "#fff" }}>
       <h1>Multi Market Terminal</h1>
 
       <div style={{ display: "flex", gap: 12 }}>
         <Column title="CRYPTO" type="crypto" color="#00d4ff" />
         <Column title="STOCKS" type="stock" color="#ffd166" />
         <Column title="FX" type="fx" color="#a0ff7a" />
+      </div>
+
+      <div style={{ marginTop: 20 }}>
+        <h3>TRADES</h3>
+
+        {trades.map((t) => (
+          <div key={t.id} style={{ fontSize: 12 }}>
+            {t.side.toUpperCase()} {t.symbol} @ {t.price.toFixed(2)}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginTop: 20 }}>
+        <h3>POSITIONS (PnL)</h3>
+
+        {Object.values(positions).map((p) => {
+          const marketPrice = data[p.symbol]?.price ?? 0;
+
+          const pnl =
+            p.quantity * (marketPrice - p.avgPrice);
+
+          return (
+            <div key={p.symbol} style={{ fontSize: 12, padding: "4px 0" }}>
+              {p.symbol} | Qty: {p.quantity} | Avg: {p.avgPrice.toFixed(2)} | PnL:{" "}
+              <span style={{ color: pnl >= 0 ? "lime" : "red" }}>
+                {pnl.toFixed(2)}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
