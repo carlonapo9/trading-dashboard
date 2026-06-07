@@ -30,26 +30,28 @@ const initialState: State = {
 
 function updatePosition(
   current: Position | undefined,
+  symbol: string,
   side: TradeSide,
   price: number
 ): Position {
   if (!current) {
-    const qty = side === "buy" ? 1 : -1;
-
     return {
-      symbol: "",
-      quantity: qty,
+      symbol,
+      quantity: side === "buy" ? 1 : -1,
       avgPrice: price,
     };
   }
 
-  const newQty = side === "buy" ? current.quantity + 1 : current.quantity - 1;
+  const newQty = side === "buy"
+    ? current.quantity + 1
+    : current.quantity - 1;
 
   const totalCost =
-    current.avgPrice * current.quantity + price * (side === "buy" ? 1 : -1);
+    current.avgPrice * current.quantity +
+    price * (side === "buy" ? 1 : -1);
 
   return {
-    symbol: current.symbol,
+    symbol,
     quantity: newQty,
     avgPrice: newQty === 0 ? 0 : totalCost / newQty,
   };
@@ -66,10 +68,12 @@ const slice = createSlice({
 
       const existing = state.positions[t.symbol];
 
-      const updated = updatePosition(existing, t.side, t.price);
-      updated.symbol = t.symbol;
-
-      state.positions[t.symbol] = updated;
+      state.positions[t.symbol] = updatePosition(
+        existing,
+        t.symbol,
+        t.side,
+        t.price
+      );
     },
   },
 });

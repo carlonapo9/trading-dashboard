@@ -2,9 +2,10 @@ import { useEffect } from "react";
 import { useDispatch } from "react-redux";
 import type { AppDispatch } from "./store";
 import { upsert } from "./marketSlice";
+import { updateCandle } from "./candles";
 
 const CRYPTO =
-  "wss://stream.binance.com:9443/ws/btcusdt@trade/ethusdt@trade/solusdt@trade";
+  "wss://stream.binance.com:9443/ws/btcusdt@trade/ethusdt@trade/solusdt@trade/xrpusdt@trade/adausdt@trade/dogeusdt@trade/ltcusdt@trade";
 
 const STOCKS = ["AAPL", "MSFT", "TSLA", "AMZN", "GOOGL"];
 
@@ -29,6 +30,7 @@ export function useMarketFeeds() {
       if (!msg?.s || !Number.isFinite(price)) return;
 
       dispatch(upsert({ symbol: msg.s, price, type: "crypto" }));
+      updateCandle(msg.s, price);
     };
 
     return () => ws.close();
@@ -49,6 +51,7 @@ export function useMarketFeeds() {
       results.forEach((x) => {
         if (Number.isFinite(x.price)) {
           dispatch(upsert({ symbol: x.s, price: x.price, type: "stock" }));
+          updateCandle(x.s, x.price);
         }
       });
     };
@@ -70,6 +73,7 @@ export function useMarketFeeds() {
         if (!Number.isFinite(price)) return;
 
         dispatch(upsert({ symbol: p.label, price, type: "fx" }));
+        updateCandle(p.label, price);
       });
     };
 

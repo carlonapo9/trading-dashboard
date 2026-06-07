@@ -4,9 +4,10 @@ import type { RootState, AppDispatch } from "./store";
 import { upsert } from "./marketSlice";
 import { addTrade } from "./tradeSlice";
 import { useMarketFeeds } from "./useMarketFeeds";
+import Chart from "./Chart";
 
 const CRYPTO =
-  "wss://stream.binance.com:9443/ws/btcusdt@trade/ethusdt@trade/solusdt@trade";
+  "wss://stream.binance.com:9443/ws/btcusdt@trade/ethusdt@trade/solusdt@trade/xrpusdt@trade/adausdt@trade/dogeusdt@trade/ltcusdt@trade";
 
 const STOCKS = ["AAPL", "MSFT", "TSLA", "AMZN", "GOOGL"] as const;
 
@@ -16,7 +17,8 @@ const FX = [
   { key: "JPY", label: "USD/JPY" },
 ] as const;
 
-const FINNHUB_KEY = "d8i21l9r01qm63b99ti0d8i21l9r01qm63b99tig";
+const FINNHUB_KEY =
+  "d8i21l9r01qm63b99ti0d8i21l9r01qm63b99tig";
 
 export default function App() {
   const dispatch = useDispatch<AppDispatch>();
@@ -26,13 +28,11 @@ export default function App() {
 
   useMarketFeeds();
 
-  // CRYPTO
   useEffect(() => {
     const ws = new WebSocket(CRYPTO);
 
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data);
-
       const price = Number(msg?.p);
       if (!msg?.s || !Number.isFinite(price)) return;
 
@@ -42,7 +42,6 @@ export default function App() {
     return () => ws.close();
   }, [dispatch]);
 
-  // STOCKS
   useEffect(() => {
     const run = async () => {
       const results = await Promise.all(
@@ -67,7 +66,6 @@ export default function App() {
     return () => clearInterval(id);
   }, [dispatch]);
 
-  // FX
   useEffect(() => {
     const run = async () => {
       const r = await fetch("https://open.er-api.com/v6/latest/USD");
@@ -89,7 +87,6 @@ export default function App() {
     return () => clearInterval(id);
   }, [dispatch]);
 
-  // LATENCY SIMULATION TRADE (FIX: real UI behavior)
   const placeTrade = (
     symbol: string,
     price: number,
@@ -105,11 +102,9 @@ export default function App() {
       time: Date.now(),
     };
 
-    const latency = 300 + Math.random() * 1200;
-
     setTimeout(() => {
       dispatch(addTrade(tradeSnapshot));
-    }, latency);
+    }, 300 + Math.random() * 1200);
   };
 
   const Column = ({
@@ -124,25 +119,54 @@ export default function App() {
     const items = Object.values(data).filter((i) => i.type === type);
 
     return (
-      <div style={{ flex: 1 }}>
-        <h3 style={{ color }}>{title}</h3>
+      <div
+        style={{
+          background: "#0f1623",
+          padding: 10,
+          borderRadius: 10,
+          border: "1px solid rgba(255,255,255,0.06)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+        }}
+      >
+        <h3 style={{ color, margin: 0, fontSize: 14 }}>{title}</h3>
 
         {items.map((i) => (
           <div
             key={i.symbol}
             style={{
+              background: "rgba(255,255,255,0.04)",
+              borderRadius: 6,
+              padding: 8,
               display: "flex",
-              justifyContent: "space-between",
-              padding: 6,
-              marginBottom: 6,
-              background: "rgba(255,255,255,0.05)",
+              flexDirection: "column",
+              gap: 4,
             }}
           >
-            <span>{i.symbol}</span>
-            <span>{i.price.toFixed(2)}</span>
+            {/* TOP ROW */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: 12,
+              }}
+            >
+              <span>{i.symbol}</span>
+              <span style={{ fontWeight: 600 }}>
+                {i.price.toFixed(2)}
+              </span>
+            </div>
 
+            {/* CHART (SMALL + CLEAN) */}
+            <div style={{ height: 28, overflow: "hidden", opacity: 0.8 }}>
+              <Chart symbol={i.symbol} />
+            </div>
+
+            {/* ACTIONS */}
             <div style={{ display: "flex", gap: 6 }}>
               <button
+                style={{ fontSize: 11 }}
                 onClick={() =>
                   placeTrade(i.symbol, i.price, i.type, "buy")
                 }
@@ -151,6 +175,7 @@ export default function App() {
               </button>
 
               <button
+                style={{ fontSize: 11 }}
                 onClick={() =>
                   placeTrade(i.symbol, i.price, i.type, "sell")
                 }
@@ -165,38 +190,57 @@ export default function App() {
   };
 
   return (
-    <div style={{ padding: 20, background: "#0b0f14", color: "#fff" }}>
-      <h1>Multi Market Terminal</h1>
+    <div
+      style={{
+        padding: 16,
+        background: "#0b0f14",
+        color: "#fff",
+        minHeight: "100vh",
+        fontFamily: "system-ui",
+      }}
+    >
+      <h1 style={{ fontSize: 18, marginBottom: 12 }}>
+        Multi Market Terminal
+      </h1>
 
-      <div style={{ display: "flex", gap: 12 }}>
+      {/* GRID */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr 1fr",
+          gap: 10,
+        }}
+      >
         <Column title="CRYPTO" type="crypto" color="#00d4ff" />
         <Column title="STOCKS" type="stock" color="#ffd166" />
         <Column title="FX" type="fx" color="#a0ff7a" />
       </div>
 
-      <div style={{ marginTop: 20 }}>
-        <h3>TRADES</h3>
+      {/* TRADES */}
+      <div style={{ marginTop: 14 }}>
+        <h3 style={{ fontSize: 14 }}>TRADES</h3>
 
-        {trades.map((t) => (
-          <div key={t.id} style={{ fontSize: 12 }}>
-            {t.side.toUpperCase()} {t.symbol} @ {t.price.toFixed(2)}
-          </div>
-        ))}
+        <div style={{ fontSize: 11, opacity: 0.9 }}>
+          {trades.slice(0, 10).map((t) => (
+            <div key={t.id}>
+              {t.side.toUpperCase()} {t.symbol} @ {t.price.toFixed(2)}
+            </div>
+          ))}
+        </div>
       </div>
 
-      <div style={{ marginTop: 20 }}>
-        <h3>POSITIONS (PnL)</h3>
+      {/* POSITIONS */}
+      <div style={{ marginTop: 14 }}>
+        <h3 style={{ fontSize: 14 }}>POSITIONS</h3>
 
         {Object.values(positions).map((p) => {
           const marketPrice = data[p.symbol]?.price ?? 0;
-
-          const pnl =
-            p.quantity * (marketPrice - p.avgPrice);
+          const pnl = p.quantity * (marketPrice - p.avgPrice);
 
           return (
-            <div key={p.symbol} style={{ fontSize: 12, padding: "4px 0" }}>
-              {p.symbol} | Qty: {p.quantity} | Avg: {p.avgPrice.toFixed(2)} | PnL:{" "}
-              <span style={{ color: pnl >= 0 ? "lime" : "red" }}>
+            <div key={p.symbol} style={{ fontSize: 11 }}>
+              {p.symbol} | {p.quantity} | Avg {p.avgPrice.toFixed(2)} |{" "}
+              <span style={{ color: pnl >= 0 ? "#00ff88" : "#ff4d4d" }}>
                 {pnl.toFixed(2)}
               </span>
             </div>
